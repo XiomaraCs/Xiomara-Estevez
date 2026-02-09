@@ -87,7 +87,7 @@ namespace Dynamic_Calendar
         // Added to satisfy the Paint event wired in the designer (panel_3.Paint += panel2_Paint;)
         private void panel2_Paint(object sender, PaintEventArgs e)
         {
-            // Intentionally left blank. Implement custom painting here if needed.
+            // Intentionally left blank. If custom painting needed, will be included.
         }
 
         // left arrow
