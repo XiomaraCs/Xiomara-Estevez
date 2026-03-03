@@ -8,5 +8,6 @@ Instruction:
 Must click on the bus first to be able to move:
 https://play.unity.com/en/games/a5196eae-7850-4633-a513-377d3e37b966/build
 
+Refresh page to restart.
 
 Will include the c# files detailing Player Controls and Camera. Language: c# with Assembly, not buildable on github, only to view use of functions and library from direction and camera mechanics.
