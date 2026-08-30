@@ -1,8 +1,20 @@
 'use client'
 
 import { useState, useEffect, type FormEvent, type ChangeEvent } from 'react'
+import type { User } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase'
-import { MessageSquare, Calendar, MapPin, ExternalLink } from 'lucide-react'
+import { CUNY_CAMPUSES } from '@/lib/cuny'
+import {
+  MessageSquare,
+  Calendar,
+  MapPin,
+  ExternalLink,
+  LogIn,
+  LogOut,
+  Mail,
+  School,
+  CheckCircle,
+} from 'lucide-react'
 import { format } from 'date-fns'
 
 interface Profile {
@@ -53,12 +65,23 @@ interface StudySession {
 export default function Dashboard() {
   const supabase = createClient()
 
+  const [currentUser, setCurrentUser] = useState<User | null>(null)
+
+  // Quick Login Form State
+  const [authEmail, setAuthEmail] = useState('')
+  const [authFullName, setAuthFullName] = useState('')
+  const [authCampus, setAuthCampus] = useState(CUNY_CAMPUSES[0])
+  const [authLoading, setAuthLoading] = useState(false)
+  const [authSent, setAuthSent] = useState(false)
+
+  // App Data State
   const [channels, setChannels] = useState<Channel[]>([])
   const [activeChannel, setActiveChannel] = useState<Channel | null>(null)
   const [posts, setPosts] = useState<Post[]>([])
   const [sessions, setSessions] = useState<StudySession[]>([])
   const [activeTab, setActiveTab] = useState<'threads' | 'sessions'>('threads')
 
+  // Create Post / Session State
   const [newPostTitle, setNewPostTitle] = useState('')
   const [newPostContent, setNewPostContent] = useState('')
   const [newResourceUrl, setNewResourceUrl] = useState('')
@@ -68,7 +91,24 @@ export default function Dashboard() {
   const [sessionDetail, setSessionDetail] = useState('')
   const [sessionDate, setSessionDate] = useState('')
 
-  // 1. Fetch channels on initial mount
+  // 1. Auth Listener
+  useEffect(() => {
+    async function checkUser() {
+      const { data: { user } } = await supabase.auth.getUser()
+      setCurrentUser(user)
+    }
+    checkUser()
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setCurrentUser(session?.user ?? null)
+    })
+
+    return () => {
+      listener.subscription.unsubscribe()
+    }
+  }, [supabase])
+
+  // 2. Fetch Channels
   useEffect(() => {
     let isMounted = true
 
@@ -88,7 +128,7 @@ export default function Dashboard() {
     }
   }, [supabase])
 
-  // 2. Fetch feed when activeChannel changes (with explicit channelId narrowing)
+  // 3. Fetch Feed
   useEffect(() => {
     if (!activeChannel) return
     const channelId = activeChannel.id
@@ -121,7 +161,6 @@ export default function Dashboard() {
     }
   }, [activeChannel, supabase])
 
-  // Helper to refresh feed after creating a post or session
   async function refreshFeed(channelId: string) {
     const [postsRes, sessionsRes] = await Promise.all([
       supabase
@@ -140,15 +179,39 @@ export default function Dashboard() {
     setSessions((sessionsRes.data as StudySession[]) || [])
   }
 
+  async function handleDirectLogin(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    setAuthLoading(true)
+    setAuthSent(false)
+
+    const { error } = await supabase.auth.signInWithOtp({
+      email: authEmail,
+      options: {
+        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        data: {
+          full_name: authFullName || authEmail.split('@')[0],
+          campus: authCampus,
+        },
+      },
+    })
+
+    setAuthLoading(false)
+    if (error) {
+      alert(error.message)
+      return
+    }
+
+    setAuthSent(true)
+  }
+
   async function handleCreatePost(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return alert('Log in with your CUNY email')
+    if (!currentUser) return alert('Please enter your CUNY email and log in first.')
     if (!activeChannel) return
 
     await supabase.from('posts').insert({
       channel_id: activeChannel.id,
-      author_id: user.id,
+      author_id: currentUser.id,
       title: newPostTitle,
       content: newPostContent,
       resource_url: newResourceUrl || null,
@@ -162,13 +225,12 @@ export default function Dashboard() {
 
   async function handleCreateSession(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return alert('Log in with your CUNY email')
+    if (!currentUser) return alert('Please enter your CUNY email and log in first.')
     if (!activeChannel) return
 
     await supabase.from('study_sessions').insert({
       channel_id: activeChannel.id,
-      creator_id: user.id,
+      creator_id: currentUser.id,
       title: sessionTitle,
       location_type: sessionType,
       location_detail: sessionDetail,
@@ -181,49 +243,130 @@ export default function Dashboard() {
     refreshFeed(activeChannel.id)
   }
 
-  return (
-    <div className="flex h-screen bg-slate-950 text-slate-100">
-      <aside className="w-64 border-r border-slate-800 bg-slate-900/50 flex flex-col p-4">
-        <div className="flex items-center gap-2 mb-6">
-          <div className="bg-blue-600 p-1.5 rounded-lg font-bold">CV</div>
-          <span className="font-bold text-lg tracking-tight">CUNYVerse</span>
-        </div>
+  async function handleSignOut() {
+    await supabase.auth.signOut()
+    setCurrentUser(null)
+  }
 
-        <div className="flex-1 overflow-y-auto space-y-4">
-          <div>
-            <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-              Class & Campus Channels
-            </div>
-            <div className="space-y-1">
-              {channels.map((ch) => (
-                <button
-                  type="button"
-                  key={ch.id}
-                  onClick={() => setActiveChannel(ch)}
-                  className={`w-full text-left px-2.5 py-1.5 rounded text-sm flex items-center gap-2 transition ${
-                    activeChannel?.id === ch.id
-                      ? 'bg-blue-600 text-white font-medium'
-                      : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-                  }`}
-                >
-                  <span className="text-slate-500">#</span>
-                  <span className="truncate">{ch.name}</span>
-                </button>
-              ))}
+  return (
+    <div className="flex h-screen bg-slate-950 text-slate-100 font-sans">
+      {/* 1. Channel & Auth Sidebar */}
+      <aside className="w-72 border-r border-slate-800 bg-slate-900/60 flex flex-col justify-between p-4 overflow-hidden">
+        <div className="flex flex-col flex-1 overflow-hidden">
+          <div className="flex items-center gap-2 mb-6">
+            <div className="bg-blue-600 p-1.5 rounded-lg font-bold text-white shadow-md shadow-blue-500/20">CV</div>
+            <span className="font-bold text-lg tracking-tight text-white">CUNYVerse</span>
+          </div>
+
+          <div className="flex-1 overflow-y-auto space-y-4 pr-1">
+            <div>
+              <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                Class & Campus Channels
+              </div>
+              <div className="space-y-1">
+                {channels.map((ch) => (
+                  <button
+                    type="button"
+                    key={ch.id}
+                    onClick={() => setActiveChannel(ch)}
+                    className={`w-full text-left px-3 py-1.5 rounded-lg text-sm flex items-center gap-2 transition ${
+                      activeChannel?.id === ch.id
+                        ? 'bg-blue-600 text-white font-medium shadow-sm'
+                        : 'text-slate-400 hover:bg-slate-800/80 hover:text-slate-200'
+                    }`}
+                  >
+                    <span className="text-slate-500 font-mono">#</span>
+                    <span className="truncate">{ch.name}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         </div>
 
-        <div className="border-t border-slate-800 pt-3 text-xs text-slate-400">
-          Logged in as CUNY Student
+        {/* Persistent Login / Account Area */}
+        <div className="border-t border-slate-800/80 pt-4 mt-2">
+          {currentUser ? (
+            <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 flex items-center justify-between">
+              <div className="truncate pr-2">
+                <div className="text-[11px] text-slate-400">Signed in as</div>
+                <div className="text-xs font-semibold text-slate-200 truncate">{currentUser.email}</div>
+              </div>
+              <button
+                type="button"
+                onClick={handleSignOut}
+                className="p-1.5 rounded text-slate-400 hover:text-red-400 hover:bg-slate-800 transition"
+                title="Sign Out"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
+          ) : (
+            <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 space-y-2.5">
+              <div className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                <LogIn className="w-3.5 h-3.5 text-blue-400" /> CUNY Student Login
+              </div>
+
+              {authSent ? (
+                <div className="p-2.5 bg-emerald-950/50 border border-emerald-800/70 rounded-lg text-[11px] text-emerald-300 flex items-start gap-1.5">
+                  <CheckCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5 text-emerald-400" />
+                  <span>Magic link sent! Check your inbox to finish logging in.</span>
+                </div>
+              ) : (
+                <form onSubmit={handleDirectLogin} className="space-y-2">
+                  <input
+                    type="text"
+                    placeholder="Your Name (e.g. Alex M.)"
+                    value={authFullName}
+                    onChange={(e) => setAuthFullName(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-slate-100 outline-none focus:border-blue-500"
+                    required
+                  />
+                  <div className="relative">
+                    <select
+                      value={authCampus}
+                      onChange={(e) => setAuthCampus(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-slate-100 outline-none focus:border-blue-500 appearance-none"
+                    >
+                      {CUNY_CAMPUSES.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
+                    <School className="w-3.5 h-3.5 text-slate-500 absolute right-2.5 top-2 pointer-events-none" />
+                  </div>
+                  <div className="relative">
+                    <input
+                      type="email"
+                      placeholder="student@baruchmail.cuny.edu"
+                      value={authEmail}
+                      onChange={(e) => setAuthEmail(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-slate-100 outline-none focus:border-blue-500 pr-7"
+                      required
+                    />
+                    <Mail className="w-3.5 h-3.5 text-slate-500 absolute right-2.5 top-2 pointer-events-none" />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={authLoading}
+                    className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium py-1.5 rounded text-xs transition"
+                  >
+                    {authLoading ? 'Sending Link...' : 'Send Magic Link'}
+                  </button>
+                </form>
+              )}
+            </div>
+          )}
         </div>
       </aside>
 
+      {/* 2. Main Content Feed */}
       <main className="flex-1 flex flex-col min-w-0">
-        <header className="h-14 border-b border-slate-800 px-6 flex items-center justify-between">
-          <div className="flex items-center gap-2 font-semibold">
-            <span>#{activeChannel?.name || 'select-channel'}</span>
-            <span className="text-xs text-slate-400 font-normal border border-slate-700 px-2 py-0.5 rounded">
+        <header className="h-14 border-b border-slate-800 px-6 flex items-center justify-between bg-slate-900/30 backdrop-blur-sm">
+          <div className="flex items-center gap-2.5 font-semibold">
+            <span className="text-white">#{activeChannel?.name || 'select-channel'}</span>
+            <span className="text-xs text-slate-400 font-normal border border-slate-800 bg-slate-900 px-2 py-0.5 rounded">
               {activeChannel?.campus || 'All CUNY'}
             </span>
           </div>
@@ -231,8 +374,8 @@ export default function Dashboard() {
             <button
               type="button"
               onClick={() => setActiveTab('threads')}
-              className={`px-3 py-1.5 rounded text-sm flex items-center gap-1.5 ${
-                activeTab === 'threads' ? 'bg-slate-800 text-white' : 'text-slate-400'
+              className={`px-3 py-1.5 rounded-lg text-sm flex items-center gap-1.5 transition ${
+                activeTab === 'threads' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
               <MessageSquare className="w-4 h-4" /> Discussion Threads
@@ -240,8 +383,8 @@ export default function Dashboard() {
             <button
               type="button"
               onClick={() => setActiveTab('sessions')}
-              className={`px-3 py-1.5 rounded text-sm flex items-center gap-1.5 ${
-                activeTab === 'sessions' ? 'bg-slate-800 text-white' : 'text-slate-400'
+              className={`px-3 py-1.5 rounded-lg text-sm flex items-center gap-1.5 transition ${
+                activeTab === 'sessions' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
               <Calendar className="w-4 h-4" /> Study Sessions
@@ -252,39 +395,41 @@ export default function Dashboard() {
         <div className="flex-1 overflow-y-auto p-6 max-w-4xl w-full mx-auto space-y-6">
           {activeTab === 'threads' ? (
             <>
-              <form onSubmit={handleCreatePost} className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
+              {/* Thread Creator Form */}
+              <form onSubmit={handleCreatePost} className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3 shadow-lg shadow-black/20">
                 <input
                   type="text"
-                  placeholder="Post Title (e.g. Midterm 1 Study Guide for CS 211)"
+                  placeholder="Post Title (e.g., Midterm 1 Study Guide for CS 211)"
                   value={newPostTitle}
                   onChange={(e) => setNewPostTitle(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-1.5 text-sm outline-none focus:border-blue-500"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500 text-slate-100"
                   required
                 />
                 <textarea
-                  placeholder="Share your questions, notes, or tips..."
+                  placeholder="Share notes, questions, or resources with your class..."
                   value={newPostContent}
                   onChange={(e) => setNewPostContent(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm outline-none focus:border-blue-500 min-h-[80px]"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500 min-h-[85px] text-slate-100"
                   required
                 />
                 <div className="flex gap-2">
                   <input
                     type="url"
-                    placeholder="Link to Google Doc / Notion (optional)"
+                    placeholder="Resource link (e.g. Google Docs, GitHub, Notion)"
                     value={newResourceUrl}
                     onChange={(e) => setNewResourceUrl(e.target.value)}
-                    className="flex-1 bg-slate-950 border border-slate-800 rounded px-3 py-1.5 text-xs outline-none"
+                    className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs outline-none text-slate-100"
                   />
-                  <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded text-sm font-medium">
+                  <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition">
                     Post Thread
                   </button>
                 </div>
               </form>
 
+              {/* Feed of Posts */}
               <div className="space-y-3">
                 {posts.map((post) => (
-                  <article key={post.id} className="bg-slate-900/60 border border-slate-800/80 rounded-xl p-4 hover:border-slate-700 transition">
+                  <article key={post.id} className="bg-slate-900/70 border border-slate-800 rounded-xl p-4 hover:border-slate-700 transition">
                     <div className="flex items-center gap-2 text-xs text-slate-400 mb-2">
                       <span className="font-semibold text-slate-200">{post.profiles?.full_name || 'Anonymous'}</span>
                       <span>•</span>
@@ -299,7 +444,7 @@ export default function Dashboard() {
                         href={post.resource_url}
                         target="_blank"
                         rel="noreferrer"
-                        className="inline-flex items-center gap-1.5 text-xs text-blue-400 bg-blue-950/40 border border-blue-800 px-2.5 py-1 rounded"
+                        className="inline-flex items-center gap-1.5 text-xs text-blue-400 bg-blue-950/40 border border-blue-800 px-2.5 py-1 rounded hover:underline"
                       >
                         <ExternalLink className="w-3.5 h-3.5" /> Attached Study Resource
                       </a>
@@ -310,22 +455,23 @@ export default function Dashboard() {
             </>
           ) : (
             <>
-              <form onSubmit={handleCreateSession} className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
+              {/* Study Meetup Creator Form */}
+              <form onSubmit={handleCreateSession} className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3 shadow-lg shadow-black/20">
                 <h4 className="text-sm font-semibold">Propose a Study Session</h4>
                 <div className="grid grid-cols-2 gap-3">
                   <input
                     type="text"
-                    placeholder="Session Topic (e.g. Calculus Quiz 3 Cram)"
+                    placeholder="Topic (e.g. Calculus Quiz 3 Review)"
                     value={sessionTitle}
                     onChange={(e) => setSessionTitle(e.target.value)}
-                    className="bg-slate-950 border border-slate-800 rounded px-3 py-1.5 text-sm outline-none"
+                    className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm outline-none text-slate-100"
                     required
                   />
                   <input
                     type="datetime-local"
                     value={sessionDate}
                     onChange={(e) => setSessionDate(e.target.value)}
-                    className="bg-slate-950 border border-slate-800 rounded px-3 py-1.5 text-sm outline-none text-slate-300"
+                    className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm outline-none text-slate-300"
                     required
                   />
                 </div>
@@ -333,25 +479,26 @@ export default function Dashboard() {
                   <select
                     value={sessionType}
                     onChange={(e: ChangeEvent<HTMLSelectElement>) => setSessionType(e.target.value as 'in-person' | 'virtual')}
-                    className="bg-slate-950 border border-slate-800 rounded px-3 py-1.5 text-sm outline-none"
+                    className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm outline-none text-slate-100"
                   >
-                    <option value="in-person">In-Person (Campus Library / Lounge)</option>
+                    <option value="in-person">In-Person (Campus Library / Room)</option>
                     <option value="virtual">Virtual (Zoom / Discord)</option>
                   </select>
                   <input
                     type="text"
-                    placeholder={sessionType === 'in-person' ? 'Hunter Library 4th Floor' : 'https://zoom.us/j/...'}
+                    placeholder={sessionType === 'in-person' ? 'Baruch Library 2nd Fl' : 'https://zoom.us/j/...'}
                     value={sessionDetail}
                     onChange={(e) => setSessionDetail(e.target.value)}
-                    className="bg-slate-950 border border-slate-800 rounded px-3 py-1.5 text-sm outline-none"
+                    className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm outline-none text-slate-100"
                     required
                   />
                 </div>
-                <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white py-1.5 rounded text-sm font-medium">
+                <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-sm font-medium transition">
                   Schedule Meetup
                 </button>
               </form>
 
+              {/* Study Sessions Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {sessions.map((session) => (
                   <div key={session.id} className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col justify-between">
