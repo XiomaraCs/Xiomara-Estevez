@@ -68,7 +68,7 @@ export default function Dashboard() {
 
   const [currentUser, setCurrentUser] = useState<User | null>(null)
 
-  // Quick Login / OTP State
+  // Auth & OTP State
   const [authEmail, setAuthEmail] = useState('')
   const [authFullName, setAuthFullName] = useState('')
   const [authCampus, setAuthCampus] = useState(CUNY_CAMPUSES[0])
@@ -76,14 +76,14 @@ export default function Dashboard() {
   const [authLoading, setAuthLoading] = useState(false)
   const [authSent, setAuthSent] = useState(false)
 
-  // App Data State
+  // Channels & Feed State
   const [channels, setChannels] = useState<Channel[]>([])
   const [activeChannel, setActiveChannel] = useState<Channel | null>(null)
   const [posts, setPosts] = useState<Post[]>([])
   const [sessions, setSessions] = useState<StudySession[]>([])
   const [activeTab, setActiveTab] = useState<'threads' | 'sessions'>('threads')
 
-  // Create Post / Session State
+  // Create Form State
   const [newPostTitle, setNewPostTitle] = useState('')
   const [newPostContent, setNewPostContent] = useState('')
   const [newResourceUrl, setNewResourceUrl] = useState('')
@@ -93,7 +93,7 @@ export default function Dashboard() {
   const [sessionDetail, setSessionDetail] = useState('')
   const [sessionDate, setSessionDate] = useState('')
 
-  // 1. Auth State Listener
+  // 1. Listen for Supabase session changes
   useEffect(() => {
     async function checkUser() {
       const { data: { user } } = await supabase.auth.getUser()
@@ -130,7 +130,7 @@ export default function Dashboard() {
     }
   }, [supabase])
 
-  // 3. Fetch Feed
+  // 3. Fetch Posts & Sessions
   useEffect(() => {
     if (!activeChannel) return
     const channelId = activeChannel.id
@@ -181,14 +181,10 @@ export default function Dashboard() {
     setSessions((sessionsRes.data as StudySession[]) || [])
   }
 
-  // Fallback-Safe CUNY Login Handler
+  // Clean OTP / Magic Link Request without invalid path errors
   async function handleDirectLogin(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setAuthLoading(true)
-
-    // Normalize origin: strip trailing slashes to prevent malformed callback paths
-    const baseOrigin = typeof window !== 'undefined' ? window.location.origin.replace(/\/$/, '') : ''
-    const redirectUrl = `${baseOrigin}/auth/callback`
 
     const cleanEmail = authEmail.trim().toLowerCase()
     const cleanName = authFullName.trim() || cleanEmail.split('@')[0]
@@ -196,7 +192,6 @@ export default function Dashboard() {
     const { error } = await supabase.auth.signInWithOtp({
       email: cleanEmail,
       options: {
-        emailRedirectTo: redirectUrl,
         data: {
           full_name: cleanName,
           campus: authCampus,
@@ -214,7 +209,7 @@ export default function Dashboard() {
     setAuthSent(true)
   }
 
-  // Verify OTP 6-digit code directly in-app
+  // Verify 6-digit code directly in-app
   async function handleVerifyOtp(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setAuthLoading(true)
@@ -288,7 +283,7 @@ export default function Dashboard() {
 
   return (
     <div className="flex h-screen bg-slate-950 text-slate-100 font-sans">
-      {/* 1. Channel & Auth Sidebar */}
+      {/* 1. Sidebar */}
       <aside className="w-72 border-r border-slate-800 bg-slate-900/60 flex flex-col justify-between p-4 overflow-hidden">
         <div className="flex flex-col flex-1 overflow-hidden">
           <div className="flex items-center gap-2 mb-6">
@@ -322,7 +317,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Persistent Login / Verification Area */}
+        {/* Auth / OTP Login Container */}
         <div className="border-t border-slate-800/80 pt-4 mt-2">
           {currentUser ? (
             <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 flex items-center justify-between">
@@ -349,7 +344,7 @@ export default function Dashboard() {
                 <div className="space-y-2.5">
                   <div className="p-2.5 bg-emerald-950/50 border border-emerald-800/70 rounded-lg text-[11px] text-emerald-300 flex items-start gap-1.5">
                     <CheckCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5 text-emerald-400" />
-                    <span>Link sent! Click the email link or enter the 6-digit code below:</span>
+                    <span>Check your email for the 6-digit code or link:</span>
                   </div>
                   <form onSubmit={handleVerifyOtp} className="space-y-2">
                     <div className="relative">
@@ -428,7 +423,7 @@ export default function Dashboard() {
         </div>
       </aside>
 
-      {/* 2. Main Content Feed */}
+      {/* 2. Main Content Area */}
       <main className="flex-1 flex flex-col min-w-0">
         <header className="h-14 border-b border-slate-800 px-6 flex items-center justify-between bg-slate-900/30 backdrop-blur-sm">
           <div className="flex items-center gap-2.5 font-semibold">
@@ -493,7 +488,7 @@ export default function Dashboard() {
                 </div>
               </form>
 
-              {/* Feed of Posts */}
+              {/* Thread Feed */}
               <div className="space-y-3">
                 {posts.map((post) => (
                   <article key={post.id} className="bg-slate-900/70 border border-slate-800 rounded-xl p-4 hover:border-slate-700 transition">
