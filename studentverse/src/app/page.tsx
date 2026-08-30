@@ -14,6 +14,7 @@ import {
   Mail,
   School,
   CheckCircle,
+  KeyRound,
 } from 'lucide-react'
 import { format } from 'date-fns'
 
@@ -67,10 +68,11 @@ export default function Dashboard() {
 
   const [currentUser, setCurrentUser] = useState<User | null>(null)
 
-  // Quick Login Form State
+  // Quick Login / OTP State
   const [authEmail, setAuthEmail] = useState('')
   const [authFullName, setAuthFullName] = useState('')
   const [authCampus, setAuthCampus] = useState(CUNY_CAMPUSES[0])
+  const [otpCode, setOtpCode] = useState('')
   const [authLoading, setAuthLoading] = useState(false)
   const [authSent, setAuthSent] = useState(false)
 
@@ -91,7 +93,7 @@ export default function Dashboard() {
   const [sessionDetail, setSessionDetail] = useState('')
   const [sessionDate, setSessionDate] = useState('')
 
-  // 1. Auth Listener
+  // 1. Auth State Listener
   useEffect(() => {
     async function checkUser() {
       const { data: { user } } = await supabase.auth.getUser()
@@ -179,29 +181,64 @@ export default function Dashboard() {
     setSessions((sessionsRes.data as StudySession[]) || [])
   }
 
+  // Fallback-Safe CUNY Login Handler
   async function handleDirectLogin(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setAuthLoading(true)
-    setAuthSent(false)
+
+    // Normalize origin: strip trailing slashes to prevent malformed callback paths
+    const baseOrigin = typeof window !== 'undefined' ? window.location.origin.replace(/\/$/, '') : ''
+    const redirectUrl = `${baseOrigin}/auth/callback`
+
+    const cleanEmail = authEmail.trim().toLowerCase()
+    const cleanName = authFullName.trim() || cleanEmail.split('@')[0]
 
     const { error } = await supabase.auth.signInWithOtp({
-      email: authEmail,
+      email: cleanEmail,
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        emailRedirectTo: redirectUrl,
         data: {
-          full_name: authFullName || authEmail.split('@')[0],
+          full_name: cleanName,
           campus: authCampus,
         },
       },
     })
 
     setAuthLoading(false)
+
     if (error) {
-      alert(error.message)
+      alert(`Login error: ${error.message}`)
       return
     }
 
     setAuthSent(true)
+  }
+
+  // Verify OTP 6-digit code directly in-app
+  async function handleVerifyOtp(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    setAuthLoading(true)
+
+    const cleanEmail = authEmail.trim().toLowerCase()
+
+    const { data, error } = await supabase.auth.verifyOtp({
+      email: cleanEmail,
+      token: otpCode.trim(),
+      type: 'email',
+    })
+
+    setAuthLoading(false)
+
+    if (error) {
+      alert(`Verification failed: ${error.message}`)
+      return
+    }
+
+    if (data.user) {
+      setCurrentUser(data.user)
+      setAuthSent(false)
+      setOtpCode('')
+    }
   }
 
   async function handleCreatePost(e: FormEvent<HTMLFormElement>) {
@@ -246,6 +283,7 @@ export default function Dashboard() {
   async function handleSignOut() {
     await supabase.auth.signOut()
     setCurrentUser(null)
+    setAuthSent(false)
   }
 
   return (
@@ -284,7 +322,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Persistent Login / Account Area */}
+        {/* Persistent Login / Verification Area */}
         <div className="border-t border-slate-800/80 pt-4 mt-2">
           {currentUser ? (
             <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 flex items-center justify-between">
@@ -308,9 +346,38 @@ export default function Dashboard() {
               </div>
 
               {authSent ? (
-                <div className="p-2.5 bg-emerald-950/50 border border-emerald-800/70 rounded-lg text-[11px] text-emerald-300 flex items-start gap-1.5">
-                  <CheckCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5 text-emerald-400" />
-                  <span>Magic link sent! Check your inbox to finish logging in.</span>
+                <div className="space-y-2.5">
+                  <div className="p-2.5 bg-emerald-950/50 border border-emerald-800/70 rounded-lg text-[11px] text-emerald-300 flex items-start gap-1.5">
+                    <CheckCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5 text-emerald-400" />
+                    <span>Link sent! Click the email link or enter the 6-digit code below:</span>
+                  </div>
+                  <form onSubmit={handleVerifyOtp} className="space-y-2">
+                    <div className="relative">
+                      <input
+                        type="text"
+                        placeholder="6-digit code (e.g. 123456)"
+                        value={otpCode}
+                        onChange={(e) => setOtpCode(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-slate-100 outline-none focus:border-blue-500 font-mono tracking-wider"
+                        required
+                      />
+                      <KeyRound className="w-3.5 h-3.5 text-slate-500 absolute right-2.5 top-2 pointer-events-none" />
+                    </div>
+                    <button
+                      type="submit"
+                      disabled={authLoading}
+                      className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-medium py-1.5 rounded text-xs transition"
+                    >
+                      {authLoading ? 'Verifying...' : 'Verify Code & Sign In'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAuthSent(false)}
+                      className="w-full text-slate-400 hover:text-slate-200 text-[11px] text-center"
+                    >
+                      Use different email
+                    </button>
+                  </form>
                 </div>
               ) : (
                 <form onSubmit={handleDirectLogin} className="space-y-2">
@@ -339,7 +406,7 @@ export default function Dashboard() {
                   <div className="relative">
                     <input
                       type="email"
-                      placeholder="student@baruchmail.cuny.edu"
+                      placeholder="first.last##@login.cuny.edu"
                       value={authEmail}
                       onChange={(e) => setAuthEmail(e.target.value)}
                       className="w-full bg-slate-900 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-slate-100 outline-none focus:border-blue-500 pr-7"
@@ -352,7 +419,7 @@ export default function Dashboard() {
                     disabled={authLoading}
                     className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium py-1.5 rounded text-xs transition"
                   >
-                    {authLoading ? 'Sending Link...' : 'Send Magic Link'}
+                    {authLoading ? 'Sending Link...' : 'Send Magic Link / Code'}
                   </button>
                 </form>
               )}
